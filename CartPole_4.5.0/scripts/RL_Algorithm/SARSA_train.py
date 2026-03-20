@@ -10,8 +10,10 @@ from isaaclab.app import AppLauncher
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from RL_Algorithm.Algorithm.Q_Learning import Q_Learning
+from RL_Algorithm.Algorithm.SARSA import SARSA
+
 from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
@@ -46,6 +48,16 @@ import torch
 from datetime import datetime
 import random
 
+import matplotlib
+import matplotlib.pyplot as plt
+from collections import namedtuple, deque
+from itertools import count
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+import numpy as np
+
+
 from isaaclab.envs import (
     DirectMARLEnv,
     DirectMARLEnvCfg,
@@ -53,7 +65,7 @@ from isaaclab.envs import (
     ManagerBasedRLEnvCfg,
     multi_agent_to_single_agent,
 )
-
+# from omni.isaac.lab.utils.dict import print_dict
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
@@ -64,6 +76,8 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
+
+steps_done = 0
 
 @hydra_task_config(args_cli.task, "sb3_cfg_entry_point")
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
@@ -80,41 +94,46 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env_cfg.seed = agent_cfg["seed"]
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
 
-    # directory for logging into
-    log_dir = os.path.join("logs", "sb3", args_cli.task, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
-
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
-
-    # wrap for video recording
-    if args_cli.video:
-        video_kwargs = {
-            "video_folder": os.path.join(log_dir, "videos", "train"),
-            "step_trigger": lambda step: step % args_cli.video_interval == 0,
-            "video_length": args_cli.video_length,
-            "disable_logger": True,
-        }
-        print("[INFO] Recording videos during training.")
-        print_dict(video_kwargs, nesting=4)
-        env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
     # ==================================================================== #
     # ========================= Can be modified ========================== #
 
     # hyperparameters
-    num_of_action = None
-    action_range = [None, None]  # [min, max]
-    discretize_state_weight = [None, None, None, None]  # [pose_cart:int, pose_pole:int, vel_cart:int, vel_pole:int]
-    learning_rate = None
-    n_episodes = None
-    start_epsilon = None
-    epsilon_decay = None  # reduce the exploration over time
-    final_epsilon = None
-    discount = None
+    num_of_action = 9
+    action_range = [-25, 25]  # [min, max]
+    discretize_state_weight = [2, 7, 1, 1]  # [pose_cart:int, pose_pole:int, vel_cart:int, vel_pole:int]
+    learning_rate = 2.0
+    n_episodes = 5000
+    start_epsilon = 1.0
+    epsilon_decay = 0.998  # reduce the exploration over time
+    final_epsilon = 0.01
+    discount = 0.99
+
+
+
+
+    # set up matplotlib
+    is_ipython = 'inline' in matplotlib.get_backend()
+    if is_ipython:
+        from IPython import display
+
+    plt.ion()
+
+    # if GPU is to be used
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else
+        "mps" if torch.backends.mps.is_available() else
+        "cpu"
+    )
+
+    print("device: ", device)
 
     task_name = str(args_cli.task).split('-')[0]  # Stabilize, SwingUp
-    Algorithm_name = "Q_Learning"
-    agent = Q_Learning(
+    Algorithm_name = "SARSA"
+
+    agent = SARSA(
         num_of_action=num_of_action,
         action_range=action_range,
         discretize_state_weight=discretize_state_weight,
@@ -122,77 +141,80 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         initial_epsilon=start_epsilon,
         epsilon_decay=epsilon_decay,
         final_epsilon=final_epsilon,
-        discount_factor=discount
+        discount_factor=discount,
     )
+
+    tb_log_dir = os.path.join("runs", task_name, Algorithm_name, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+    writer = SummaryWriter(log_dir=tb_log_dir)
 
     # reset environment
     obs, _ = env.reset()
-
-    print("type(obs):", type(obs))
-    print("obs:", obs)
-
-    if isinstance(obs, dict):
-        print("obs keys:", obs.keys())
-        for k, v in obs.items():
-            print(f"key={k}")
-            print("  type =", type(v))
-            print("  value =", v)
-            print("  shape =", getattr(v, "shape", None))
-
-    timestep = 0
     sum_reward = 0
+    timestep = 0
     # simulate environment
     while simulation_app.is_running():
-        # run everything in inference mode
         with torch.inference_mode():
-        
             for episode in tqdm(range(n_episodes)):
                 obs, _ = env.reset()
+                action, action_idx = agent.get_action(obs)
                 done = False
                 cumulative_reward = 0
+                count = 0
 
                 while not done:
-                    # agent stepping
-                    action, action_idx = agent.get_action(obs)
-
-                    # env stepping
                     next_obs, reward, terminated, truncated, _ = env.step(action)
 
                     reward_value = reward.item()
-                    terminated_value = terminated.item() 
+                    terminated_value = terminated.item()
+                    truncated_value = truncated.item()
+                    done = terminated_value or truncated_value
                     cumulative_reward += reward_value
 
+                    if done:
+                        next_action_idx = None
+                    else:
+                        next_action, next_action_idx = agent.get_action(next_obs)
+
                     agent.update(
-                        #== put your code here ==#
+                        obs,
+                        action_idx,
+                        reward_value,
+                        done,
+                        next_obs,
+                        next_action_idx,
                     )
 
-                    done = terminated or truncated
-                    obs = next_obs
-                
-                sum_reward += cumulative_reward
-                if episode % 100 == 0:
-                    print("avg_score: ", sum_reward / 100.0)
-                    sum_reward = 0
-                    print(agent.epsilon)
+                    if not done:
+                        obs = next_obs
+                        action = next_action
+                        action_idx = next_action_idx
 
-                    # Save Q-Learning agent
+                    count += 1
+
+                writer.add_scalar("Reward/Episode", cumulative_reward, episode)
+                writer.add_scalar("Policy/Epsilon", agent.epsilon, episode)
+                writer.add_scalar("Episode/Length", count, episode)
+
+                sum_reward += cumulative_reward
+                if (episode + 1) % 100 == 0:
+                    avg_score = sum_reward / 100.0
+                    print("avg_score:", avg_score)
+                    print(agent.epsilon)
+                    sum_reward = 0
+
                     q_value_file = f"{Algorithm_name}_{episode}_{num_of_action}_{action_range[1]}_{discretize_state_weight[0]}_{discretize_state_weight[1]}.json"
                     full_path = os.path.join(f"q_value/{task_name}", Algorithm_name)
+                    os.makedirs(full_path, exist_ok=True)
                     agent.save_q_value(full_path, q_value_file)
 
                 agent.decay_epsilon()
-             
-        if args_cli.video:
-            timestep += 1
-            # Exit the play loop after recording one video
-            if timestep == args_cli.video_length:
-                break
-        
+
         print("!!! Training is complete !!!")
         break
     # ==================================================================== #
 
     # close the simulator
+    writer.close()
     env.close()
 
 if __name__ == "__main__":

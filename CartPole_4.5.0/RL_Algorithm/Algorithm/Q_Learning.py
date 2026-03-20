@@ -42,6 +42,11 @@ class Q_Learning(BaseAlgorithm):
         
     def update(
         self,
+        obs,
+        action_idx,
+        reward_value,
+        done,
+        next_obs,
 
     ):
         """
@@ -49,4 +54,15 @@ class Q_Learning(BaseAlgorithm):
 
         This method applies the Q-Learning update rule to improve policy decisions by updating the Q-table.
         """
-        pass
+        state = self.discretize_state(obs)
+        current_q = self.q_values[state][action_idx]
+
+        if done:
+            td_target = reward_value
+        else:
+            next_state = self.discretize_state(next_obs)
+            td_target = reward_value + self.discount_factor * np.max(self.q_values[next_state])
+
+        td_error = td_target - current_q
+        self.q_values[state][action_idx] += self.lr * td_error
+        self.training_error.append(td_error)

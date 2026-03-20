@@ -11,7 +11,7 @@ class ControlType(Enum):
     Enum representing different control algorithms.
     """
     MONTE_CARLO = 1
-    TEMPORAL_DIFFERENCE = 2
+    SARSA = 2
     Q_LEARNING = 3
     DOUBLE_Q_LEARNING = 4
 
@@ -82,7 +82,15 @@ class BaseAlgorithm():
         """
 
         # ========= put your code here =========#
-        pass
+        state = obs["policy"][0]
+
+        pose_cart = int(round(state[0].item() * self.discretize_state_weight[0]))
+        pose_pole = int(round(state[1].item() * self.discretize_state_weight[1]))
+        vel_cart = int(round(state[2].item() * self.discretize_state_weight[2]))
+        vel_pole = int(round(state[3].item() * self.discretize_state_weight[3]))
+
+
+        return (pose_cart, pose_pole, vel_cart, vel_pole)
         # ======================================#
 
     def get_discretize_action(self, obs_dis) -> int:
@@ -96,7 +104,13 @@ class BaseAlgorithm():
             int: Chosen discrete action index.
         """
         # ========= put your code here =========#
-        pass
+        if np.random.rand() < self.epsilon:
+            return int(np.random.randint(self.num_of_action))
+
+        if self.control_type == ControlType.DOUBLE_Q_LEARNING:
+            return int(np.argmax(self.qa_values[obs_dis] + self.qb_values[obs_dis]))
+
+        return int(np.argmax(self.q_values[obs_dis]))
         # ======================================#
     
     def mapping_action(self, action):
@@ -111,8 +125,15 @@ class BaseAlgorithm():
             torch.Tensor: Scaled action tensor.
         """
         # ========= put your code here =========#
-        pass
-        # ======================================#s
+        action_min, action_max = self.action_range
+
+        if self.num_of_action == 1:
+            action_value = (action_min + action_max) / 2.0
+        else:
+            action_value = action_min + (action / (self.num_of_action - 1)) * (action_max - action_min)
+
+        return torch.tensor([[action_value]], dtype=torch.float32)
+        # ======================================#
 
     def get_action(self, obs) -> torch.tensor:
         """
@@ -133,6 +154,8 @@ class BaseAlgorithm():
         """
         Decay epsilon value to reduce exploration over time.
         """
+        self.epsilon = max(self.final_epsilon, self.epsilon * self.epsilon_decay)
+        return self.epsilon
 
     def save_q_value(self, path, filename):
         """
@@ -199,4 +222,3 @@ class BaseAlgorithm():
                     tuple_state = tuple(map(float, state.split(', ')))
                     self.n_values[tuple_state] = n_values.copy()
             return self.q_values
-

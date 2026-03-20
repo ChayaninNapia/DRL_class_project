@@ -10,7 +10,7 @@ from isaaclab.app import AppLauncher
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from RL_Algorithm.Algorithm.Q_Learning import Q_Learning
+from RL_Algorithm.Algorithm.MC import MC
 from tqdm import tqdm
 
 # add argparse arguments
@@ -56,6 +56,10 @@ from isaaclab.envs import (
 
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 from isaaclab_tasks.utils.hydra import hydra_task_config
+from isaaclab.utils.dict import print_dict
+
+from torch.utils.tensorboard import SummaryWriter
+
 
 # Import extensions to set up environment tasks
 import CartPole.tasks  # noqa: F401
@@ -102,19 +106,19 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # ========================= Can be modified ========================== #
 
     # hyperparameters
-    num_of_action = None
-    action_range = [None, None]  # [min, max]
-    discretize_state_weight = [None, None, None, None]  # [pose_cart:int, pose_pole:int, vel_cart:int, vel_pole:int]
-    learning_rate = None
-    n_episodes = None
-    start_epsilon = None
-    epsilon_decay = None  # reduce the exploration over time
-    final_epsilon = None
-    discount = None
+    num_of_action = 9
+    action_range = [-25, 25]  # [min, max]
+    discretize_state_weight = [2, 7, 1, 1]  # [pose_cart:int, pose_pole:int, vel_cart:int, vel_pole:int]
+    learning_rate = 0.1
+    n_episodes = 5000
+    start_epsilon = 1.0
+    epsilon_decay = 0.998  # reduce the exploration over time
+    final_epsilon = 0.01
+    discount = 0.99
 
     task_name = str(args_cli.task).split('-')[0]  # Stabilize, SwingUp
-    Algorithm_name = "Q_Learning"
-    agent = Q_Learning(
+    Algorithm_name = "MC"
+    agent = MC(
         num_of_action=num_of_action,
         action_range=action_range,
         discretize_state_weight=discretize_state_weight,
@@ -125,19 +129,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         discount_factor=discount
     )
 
+    tb_log_dir = os.path.join("runs", task_name, Algorithm_name, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+    writer = SummaryWriter(log_dir=tb_log_dir)
+
+
     # reset environment
     obs, _ = env.reset()
-
-    print("type(obs):", type(obs))
-    print("obs:", obs)
-
-    if isinstance(obs, dict):
-        print("obs keys:", obs.keys())
-        for k, v in obs.items():
-            print(f"key={k}")
-            print("  type =", type(v))
-            print("  value =", v)
-            print("  shape =", getattr(v, "shape", None))
 
     timestep = 0
     sum_reward = 0
@@ -150,6 +147,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 obs, _ = env.reset()
                 done = False
                 cumulative_reward = 0
+                count = 0
 
                 while not done:
                     # agent stepping
@@ -162,22 +160,34 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     terminated_value = terminated.item() 
                     cumulative_reward += reward_value
 
+                    done = terminated.item() or truncated.item()
+
                     agent.update(
-                        #== put your code here ==#
+                        obs,
+                        action_idx,
+                        reward_value,
+                        done,
                     )
 
-                    done = terminated or truncated
                     obs = next_obs
+                    count += 1
+
+                writer.add_scalar("Reward/Episode", cumulative_reward, episode)
+                writer.add_scalar("Policy/Epsilon", agent.epsilon, episode)
+                writer.add_scalar("Episode/Length", count, episode)
                 
                 sum_reward += cumulative_reward
-                if episode % 100 == 0:
-                    print("avg_score: ", sum_reward / 100.0)
+                if (episode + 1) % 100 == 0:
+                    avg_score = sum_reward / 100.0
+                    print("avg_score: ", avg_score)
                     sum_reward = 0
                     print(agent.epsilon)
 
-                    # Save Q-Learning agent
+
+                    # Save agent
                     q_value_file = f"{Algorithm_name}_{episode}_{num_of_action}_{action_range[1]}_{discretize_state_weight[0]}_{discretize_state_weight[1]}.json"
                     full_path = os.path.join(f"q_value/{task_name}", Algorithm_name)
+                    os.makedirs(full_path, exist_ok=True)
                     agent.save_q_value(full_path, q_value_file)
 
                 agent.decay_epsilon()
@@ -193,6 +203,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # ==================================================================== #
 
     # close the simulator
+    writer.close()
     env.close()
 
 if __name__ == "__main__":

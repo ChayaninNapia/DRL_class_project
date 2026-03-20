@@ -1,5 +1,4 @@
 from __future__ import annotations
-import numpy as np
 from RL_Algorithm.RL_base import BaseAlgorithm, ControlType
 
 class SARSA(BaseAlgorithm):
@@ -41,6 +40,12 @@ class SARSA(BaseAlgorithm):
         
     def update(
         self,
+        obs,
+        action_idx,
+        reward_value,
+        terminated,
+        next_obs,
+        next_action_idx,
 
     ):
         """
@@ -48,4 +53,15 @@ class SARSA(BaseAlgorithm):
 
         This method applies the SARSA update rule to improve policy decisions by updating the Q-table.
         """
-        pass
+        state = self.discretize_state(obs)
+        current_q = self.q_values[state][action_idx]
+
+        if terminated:
+            td_target = reward_value
+        else:
+            next_state = self.discretize_state(next_obs)
+            td_target = reward_value + self.discount_factor * self.q_values[next_state][next_action_idx]
+
+        td_error = td_target - current_q
+        self.q_values[state][action_idx] += self.lr * td_error
+        self.training_error.append(td_error)

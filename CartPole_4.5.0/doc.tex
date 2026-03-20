@@ -1,0 +1,253 @@
+\documentclass[11pt]{article} % Don't change this
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[numbers, square]{natbib}
+
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{FRA 503: Deep Reinforcement Learning, 2026}
+\rhead{Student ID}
+\renewcommand{\headrulewidth}{0.4pt}
+\cfoot{\thepage}
+\setlength{\headheight}{15pt}
+
+\setlength{\marginparwidth}{3.4cm}
+
+\title{
+\normalfont \normalsize
+\textsc{FRA 503: Deep Reinforcement Learning, 2026} \\
+[10pt]
+\rule{\linewidth}{0.5pt} \\[6pt]
+\huge Homework 2: Cart-Pole Reinforcement Learning \\
+\rule{\linewidth}{2pt} \\[10pt]
+}
+\author{Your Name \\ Student ID}
+\date{\normalsize \today}
+
+\begin{document}
+
+\maketitle
+
+\section{Problem Formulation}
+The stabilizing Cart-Pole task is formulated as an episodic Markov Decision Process $(\mathcal{S}, \mathcal{A}, P, R, \gamma)$. At time step $t$, the agent observes state $s_t$, selects action $a_t$, receives reward $r_{t+1}$, and transitions to the next state $s_{t+1}$.
+
+The state contains four variables: cart position, pole angle, cart velocity, and pole angular velocity. The action is a discretized control force mapped to a continuous range. The objective is to maximize cumulative discounted reward while keeping the pole upright and the cart near the center. An episode terminates when the pole falls beyond the allowed angle or the cart exceeds the position limit.
+
+\section{Methods}
+
+\subsection{State and Action Discretization}
+Tabular reinforcement learning requires finite state and action spaces. Therefore, the continuous observation is mapped to a discrete state, and the continuous control force is mapped from a discrete action index. The action-value function is stored as a table $Q(s,a)$ over discretized state-action pairs.
+
+\subsection{Monte Carlo}
+Monte Carlo updates are performed after the end of an episode using the return
+\[
+G_t = \sum_{k=0}^{T-t-1}\gamma^k r_{t+k+1}.
+\]
+For first-visit Monte Carlo, the action-value update is
+\[
+Q(s_t,a_t) \leftarrow Q(s_t,a_t) + \frac{1}{N(s_t,a_t)}\left(G_t - Q(s_t,a_t)\right).
+\]
+
+\subsection{SARSA}
+SARSA is an on-policy temporal-difference method that updates using the next action selected by the current policy:
+\[
+Q(s_t,a_t) \leftarrow Q(s_t,a_t) + \alpha \left[r_{t+1} + \gamma Q(s_{t+1},a_{t+1}) - Q(s_t,a_t)\right].
+\]
+For a terminal transition, the bootstrap term is removed:
+\[
+Q(s_t,a_t) \leftarrow Q(s_t,a_t) + \alpha \left[r_{t+1} - Q(s_t,a_t)\right].
+\]
+
+\subsection{Q-Learning}
+Q-Learning is an off-policy method that bootstraps from the greedy next-state estimate:
+\[
+Q(s_t,a_t) \leftarrow Q(s_t,a_t) + \alpha \left[r_{t+1} + \gamma \max_{a'}Q(s_{t+1},a') - Q(s_t,a_t)\right].
+\]
+For a terminal transition:
+\[
+Q(s_t,a_t) \leftarrow Q(s_t,a_t) + \alpha \left[r_{t+1} - Q(s_t,a_t)\right].
+\]
+
+\subsection{Double Q-Learning}
+Double Q-Learning maintains two value tables, $Q_A$ and $Q_B$, to reduce overestimation bias. The alternating updates are
+\[
+Q_A(s_t,a_t) \leftarrow Q_A(s_t,a_t) + \alpha \left[r_{t+1} + \gamma Q_B\left(s_{t+1}, \arg\max_{a'} Q_A(s_{t+1},a')\right) - Q_A(s_t,a_t)\right]
+\]
+and
+\[
+Q_B(s_t,a_t) \leftarrow Q_B(s_t,a_t) + \alpha \left[r_{t+1} + \gamma Q_A\left(s_{t+1}, \arg\max_{a'} Q_B(s_{t+1},a')\right) - Q_B(s_t,a_t)\right].
+\]
+For action selection, the implementation combines both tables through
+\[
+Q(s,a) = Q_A(s,a) + Q_B(s,a).
+\]
+
+\subsection{Exploration Strategy}
+All methods use an $\epsilon$-greedy policy:
+\[
+\pi(a|s)=
+\begin{cases}
+1-\epsilon + \frac{\epsilon}{|\mathcal{A}|}, & a = \arg\max_{a'}Q(s,a') \\
+\frac{\epsilon}{|\mathcal{A}|}, & \text{otherwise.}
+\end{cases}
+\]
+During training, $\epsilon$ decays from its initial value to a minimum final value.
+
+\section{Experimental Setup}
+Experiments are conducted on \textbf{Stabilize-Isaac-Cartpole-v0}. This section contains one baseline comparison and one learning-rate sensitivity study.
+
+\subsection{Baseline Comparison Across Four Algorithms}
+The first experiment compares Monte Carlo, SARSA, Q-Learning, and Double Q-Learning under the same baseline setting. The purpose of this experiment is to identify which algorithm performs best overall under a common configuration. The main outputs are the reward-versus-episode curves and the final evaluation performance.
+
+\begin{itemize}
+    \item \textbf{Number of actions:} $9$
+    \item \textbf{Action range:} $[-25,25]$
+    \item \textbf{Discretization weights:} $[2,7,1,1]$
+    \item \textbf{Learning rate:} $\alpha = 0.1$
+    \item \textbf{Number of episodes:} $2000$
+    \item \textbf{Initial exploration rate:} $\epsilon = 1.0$
+    \item \textbf{Exploration decay:} $0.998$
+    \item \textbf{Final exploration rate:} $\epsilon_{\min} = 0.01$
+    \item \textbf{Discount factor:} $\gamma = 0.99$
+\end{itemize}
+
+\subsection{Learning-Rate Sensitivity Study}
+The second experiment studies the effect of the learning rate on the algorithms that explicitly use a learning-rate parameter in their update rule. Therefore, this experiment is applied to SARSA, Q-Learning, and Double Q-Learning. All other hyperparameters remain fixed to the baseline setting in Section 3.1. The goal is to measure how sensitive each method is to the update step size. The value $\alpha = 2.0$ is intentionally included as a large and potentially unstable setting to reveal oscillation or divergence.
+
+\begin{itemize}
+    \item \textbf{Learning-rate values tested:} $\alpha \in \{0.1, 0.5, 2.0\}$
+    \item \textbf{Algorithms tested:} SARSA, Q-Learning, and Double Q-Learning
+    \item \textbf{Other settings:} identical to the baseline configuration in Section 3.1
+\end{itemize}
+
+\section{Results}
+
+\subsection{Experiment 1: Baseline Comparison Across Four Algorithms}
+This subsection reports the baseline comparison under the common setting defined in Section 3.1. The main goal is to compare the four algorithms in terms of convergence speed, stability, and final performance. For SARSA, Q-Learning, and Double Q-Learning, the final model used in this comparison is selected after the learning-rate tuning experiment in Section 4.2.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{ex1_all_reward.png}
+    \caption{Combined training reward curves for Monte Carlo, SARSA, Q-Learning, and Double Q-Learning on the Stabilizing Cart-Pole task.}
+    \label{fig:baseline_reward_compare}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{ex1_all_espisode_length.png}
+    \caption{Combined episode length curves for Monte Carlo, SARSA, Q-Learning, and Double Q-Learning on the Stabilizing Cart-Pole task.}
+    \label{fig:baseline_length_compare}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.75\textwidth]{epsilon_decay.png}
+    \caption{Epsilon decay schedule used during training.}
+    \label{fig:epsilon_decay}
+\end{figure}
+
+All experiments use the same epsilon decay schedule, so the exploration profile is shown once in Figure~\ref{fig:epsilon_decay}.
+
+\begin{itemize}
+    \item \textbf{Overall ranking:} Based on the reward and episode-length curves, the performance is approximately ordered as Monte Carlo $>$ Q-Learning $>$ SARSA $>$ Double Q-Learning.
+    \item \textbf{Monte Carlo:} Monte Carlo achieved the highest reward and the longest episode length. This suggests that the full-episode return was effective for this stabilization task and produced the strongest final policy among the four methods.
+    \item \textbf{Q-Learning:} Q-Learning ranked second and showed better final reward than SARSA and Double Q-Learning. Its off-policy update uses the greedy next-state estimate, which helped it propagate useful values more aggressively.
+    \item \textbf{SARSA:} SARSA improved more gradually and remained below Q-Learning. Because SARSA is on-policy, its update is affected by the exploratory action actually taken, which can make learning more conservative during training.
+    \item \textbf{Double Q-Learning:} Double Q-Learning gave the lowest reward in this experiment. Although it reduces overestimation bias, its two-table update can slow value propagation and may require more data or better tuning to outperform standard Q-Learning.
+\end{itemize}
+
+\subsubsection{Evaluation Performance}
+Figure~\ref{fig:q_surface_compare} shows the evaluation plots of the trained Monte Carlo, SARSA, Q-Learning, and Double Q-Learning agents.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{minipage}[t]{0.45\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{MC_q_surface.png}
+        
+        \small (a) Monte Carlo
+    \end{minipage}
+    \hfill
+    \begin{minipage}[t]{0.45\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{SARSA_q_surface.png}
+        
+        \small (b) SARSA
+    \end{minipage}
+
+    \vspace{0.8em}
+
+    \begin{minipage}[t]{0.45\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{Q_q_surface.png}
+        
+        \small (c) Q-Learning
+    \end{minipage}
+    \hfill
+    \begin{minipage}[t]{0.45\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{QQ_q_surface.png}
+        
+        \small (d) Double Q-Learning
+    \end{minipage}
+    \caption{Evaluation plots for Monte Carlo, SARSA, Q-Learning, and Double Q-Learning in the baseline comparison.}
+    \label{fig:q_surface_compare}
+\end{figure}
+
+\subsection{Experiment 2: Learning-Rate Sensitivity Study}
+This subsection reports the learning-rate comparison for SARSA, Q-Learning, and Double Q-Learning. The objective is to examine how the choice of $\alpha$ affects learning behavior and robustness, and to determine the final tuned setting used in the baseline comparison of Section 4.1.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{minipage}[t]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{SARSA_learning_alpha_compare.png}
+        
+        \small (a) SARSA
+    \end{minipage}
+    \hfill
+    \begin{minipage}[t]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{Q_learning_alpha_compare.png}
+        
+        \small (b) Q-Learning
+    \end{minipage}
+    \hfill
+    \begin{minipage}[t]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{DoubleQ_learning_alpha_compare.png}
+        
+        \small (c) Double Q-Learning
+    \end{minipage}
+    \caption{Comparison of learning-rate sensitivity for SARSA, Q-Learning, and Double Q-Learning under $\alpha \in \{0.1, 0.5, 2.0\}$.}
+    \label{fig:alpha_compare}
+\end{figure}
+
+Figure~\ref{fig:alpha_compare} compares the effect of different learning rates on the three temporal-difference based methods. Insert a short comparison here, focusing on convergence speed, instability, and robustness at high $\alpha$.
+
+\begin{itemize}
+    \item \textbf{Best learning rate:} For SARSA, Q-Learning, and Double Q-Learning, $\alpha = 0.5$ gave the best overall performance among $\{0.1, 0.5, 2.0\}$.
+    \item \textbf{Low learning rate:} $\alpha = 0.1$ was generally stable but learned more slowly and reached a lower final reward than $\alpha = 0.5$.
+    \item \textbf{Intermediate learning rate:} $\alpha = 0.5$ provided the best balance between fast improvement and stable convergence, so it was selected for the final comparison in Experiment 1.
+    \item \textbf{High learning rate:} $\alpha = 2.0$ performed poorly for all three methods. The curves indicate unstable updates and weak final reward, which is consistent with overly large temporal-difference steps.
+\end{itemize}
+
+\section{Discussion}
+State which algorithm performed best under the selected setting. Support the answer with the training curve and evaluation result.
+
+Explain the result using the update equations. Compare the on-policy SARSA update, the greedy target in Q-Learning, the episodic return in Monte Carlo, and the reduced overestimation mechanism in Double Q-Learning.
+
+Discuss how discretization affected learning. A finer discretization improves representation quality, but it also increases the number of state-action pairs and can slow convergence.
+
+\section{Conclusion}
+This report compares Monte Carlo, SARSA, Q-Learning, and Double Q-Learning on the stabilizing Cart-Pole task. The comparison focuses on their update equations, training performance, and deployment behavior. The final conclusion should identify the best-performing algorithm from the experimental results and summarize how discretization influenced the learning outcome.
+
+\end{document} % NOTHING AFTER THIS LINE IS PART OF THE DOCUMENT

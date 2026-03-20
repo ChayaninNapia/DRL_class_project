@@ -41,14 +41,41 @@ class Double_Q_Learning(BaseAlgorithm):
         
     def update(
         self,
-        #========= put your code here =========#
-
-        
+        obs,
+        action_idx,
+        reward_value,
+        done,
+        next_obs,
     ):
         """
         Update Q-values using Double Q-Learning.
 
         This method applies the Double Q-Learning update rule to improve policy decisions by updating the Q-table.
         """
-        pass
-        #======================================#
+        state = self.discretize_state(obs)
+
+        if done:
+            td_target = reward_value
+
+            if np.random.rand() < 0.5:
+                td_error = td_target - self.qa_values[state][action_idx]
+                self.qa_values[state][action_idx] += self.lr * td_error
+            else:
+                td_error = td_target - self.qb_values[state][action_idx]
+                self.qb_values[state][action_idx] += self.lr * td_error
+        else:
+            next_state = self.discretize_state(next_obs)
+
+            if np.random.rand() < 0.5:
+                best_next_action = int(np.argmax(self.qa_values[next_state]))
+                td_target = reward_value + self.discount_factor * self.qb_values[next_state][best_next_action]
+                td_error = td_target - self.qa_values[state][action_idx]
+                self.qa_values[state][action_idx] += self.lr * td_error
+            else:
+                best_next_action = int(np.argmax(self.qb_values[next_state]))
+                td_target = reward_value + self.discount_factor * self.qa_values[next_state][best_next_action]
+                td_error = td_target - self.qb_values[state][action_idx]
+                self.qb_values[state][action_idx] += self.lr * td_error
+
+        self.q_values[state] = self.qa_values[state] + self.qb_values[state]
+        self.training_error.append(td_error)
