@@ -1,7 +1,7 @@
 from __future__ import annotations
 import torch
 from RL_Algorithm.RL_base_function import BaseAlgorithm
-from storage.buffers import RolloutBuffer
+from RL_Algorithm.storage.buffers import RolloutBuffer
 
 
 class OnPolicyAlgorithm(BaseAlgorithm):

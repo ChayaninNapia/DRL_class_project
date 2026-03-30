@@ -1,7 +1,7 @@
 from __future__ import annotations
 import torch
 from RL_Algorithm.RL_base_function import BaseAlgorithm
-from storage.buffers import ReplayBuffer
+from RL_Algorithm.storage.buffers import ReplayBuffer
 
 
 class OffPolicyAlgorithm(BaseAlgorithm):

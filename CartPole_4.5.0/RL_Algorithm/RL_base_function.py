@@ -64,10 +64,22 @@ class BaseAlgorithm:
             torch.Tensor: Scaled continuous action tensor.
         """
         # ========= put your code here ========= #
-        pass
+        action_min, action_max = self.action_range
+
+        if self.num_of_action is None or self.num_of_action <= 0:
+            raise ValueError("num_of_action must be set before calling scale_action().")
+
+        if action_min is None or action_max is None:
+            raise ValueError("action_range must be set before calling scale_action().")
+
+        if self.num_of_action == 1:
+            return torch.tensor([action_min], dtype=torch.float32, device=device)
+
+        scaled = action_min + (action / (self.num_of_action - 1)) * (action_max - action_min)
+        return torch.tensor([scaled], dtype=torch.float32, device=device)
         # ====================================== #
 
-    def decay_epsilon(self) -> None:
+    def decay_epsilon(self) -> float:
         """
         Decay the exploration rate by ``epsilon_decay``, floored at
         ``final_epsilon``.
@@ -75,7 +87,15 @@ class BaseAlgorithm:
         Call once per environment step during training.
         """
         # ========= put your code here ========= #
-        pass
+        if self.epsilon is None:
+            raise ValueError("epsilon is not initialized.")
+        if self.epsilon_decay is None:
+            raise ValueError("epsilon_decay is not initialized.")
+        if self.final_epsilon is None:
+            raise ValueError("final_epsilon is not initialized.")
+
+        self.epsilon = max(self.final_epsilon, self.epsilon * self.epsilon_decay)
+        return self.epsilon
         # ====================================== #
 
     # ------------------------------------------------------------------ #

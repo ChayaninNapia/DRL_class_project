@@ -1,0 +1,165 @@
+\documentclass[11pt]{article} % Don't change this
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[numbers, square]{natbib}
+\usepackage{float}
+\usepackage{array}
+\usepackage{tabularx}
+
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{} 
+\lhead{FRA 503: Deep Reinforcement Learning, 2026} 
+\rhead{Chayanin Napia 65340500009} 
+\renewcommand{\headrulewidth}{0.4pt}
+\cfoot{\thepage}
+\setlength{\headheight}{15pt}
+
+\setlength{\marginparwidth}{3.4cm}
+
+\title{
+\normalfont \normalsize 
+\textsc{FRA 503: Deep Reinforcement Learning, 2026} \\
+[10pt] 
+\rule{\linewidth}{0.5pt} \\[6pt] 
+\huge  Homework 3: Function Approximation-based RL in Cart-Pole \\
+\rule{\linewidth}{2pt}  \\[10pt]
+}
+\author{Chayanin Napia 65340500009}
+\date{\normalsize \today}
+
+\begin{document}
+
+\maketitle
+
+\section{Problem Formulation}
+The stabilizing Cart-Pole task is modeled as an episodic Markov Decision Process. The agent observes a continuous four-dimensional state and selects either discrete or continuous actions depending on the algorithm. The objective is to maximize cumulative discounted reward while keeping the pole upright and the cart near the center.
+
+\section{Methods}
+We implemented five function approximation-based reinforcement learning algorithms: Linear Q-Learning, Deep Q-Network (DQN), Monte Carlo REINFORCE, Actor-Critic (AC), and Soft Actor-Critic (SAC).
+
+\subsection{Linear Q-Learning}
+Linear Q-Learning is a \textbf{value-based}, off-policy method with a deterministic greedy policy:
+\[ a^* = \arg\max_a Q(s, a) \]
+Exploration is handled by a decaying $\epsilon$-greedy strategy.
+
+\subsection{Deep Q-Network (DQN)}
+DQN is a \textbf{value-based}, off-policy algorithm with neural-network approximation of $Q(s,a)$. Training uses $\epsilon$-greedy exploration together with a replay buffer and a target network.
+
+\subsection{REINFORCE (Monte Carlo Policy Gradient)}
+REINFORCE is a \textbf{policy-based}, on-policy method with a stochastic policy:
+\[ \nabla_{\theta} J(\theta) = \mathbb{E} \left[ \nabla_{\theta} \log \pi(a | s; \theta) G_t \right] \]
+Exploration comes directly from policy sampling.
+
+\subsection{Actor-Critic (AC)}
+Actor-Critic is a \textbf{hybrid} on-policy method with a stochastic actor $\pi(a | s; \theta)$ and a critic $V(s; w)$. The actor is updated using the advantage estimate
+\[
+A_t = G_t - V(s_t),
+\]
+which gives the policy-gradient update
+\[
+\nabla_{\theta} J(\theta) = \mathbb{E}\left[\nabla_{\theta} \log \pi(a_t|s_t;\theta)\, A_t\right].
+\]
+The critic is trained to minimize the value-estimation error
+\[
+\mathcal{L}_{value} = \left(G_t - V(s_t)\right)^2.
+\]
+Thus, the critic acts as a baseline that reduces the variance of the policy update compared with plain REINFORCE.
+
+\subsection{Soft Actor-Critic (SAC)}
+SAC is an off-policy \textbf{actor-critic} method with entropy regularization:
+\[ J(\pi) = \mathbb{E}\left[\sum_t r_t + \alpha \mathcal{H}(\pi(\cdot|s_t))\right] \]
+It uses a stochastic policy, replay buffer, and twin critics. In our implementation, SAC operates on a continuous one-dimensional action.
+
+\section{Experimental Setup}
+The experiments compare the five algorithms on the same Cart-Pole stabilization task. Linear Q, DQN, REINFORCE, and AC use discretized actions, while SAC outputs a one-dimensional continuous action directly. Table~\ref{tab:hyperparams} summarizes the main hyperparameters used in the training scripts.
+
+\begin{table}[H]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{0.13\textwidth}|>{\raggedright\arraybackslash}p{0.17\textwidth}|>{\raggedright\arraybackslash}X|}
+\hline
+\textbf{Algorithm} & \textbf{Action Setup} & \textbf{Main Hyperparameters} \\
+\hline
+Linear Q & discrete, $N_a=9$ & action range $[-25,25]$; $\eta=0.01$, $\gamma=0.99$; $\epsilon: 1.0 \rightarrow 0.01$ with decay $0.9996$; episodes $2000$ \\
+\hline
+DQN & discrete, $N_a=9$ & action range $[-25,25]$; hidden $128$; $\eta=10^{-3}$, $\tau=0.005$, $\gamma=0.99$; $\epsilon: 1.0 \rightarrow 0.05$ with decay $0.995$; buffer $10000$, batch $64$; episodes $2000$ \\
+\hline
+REINFORCE & discrete, $N_a=9$ & action range $[-25,25]$; hidden $128$; $\eta=10^{-3}$, $\gamma=0.99$; episodes $2000$ \\
+\hline
+AC & discrete, $N_a=9$ & action range $[-25,25]$; hidden $[128,128]$; $\eta=10^{-3}$, $\gamma=0.99$; value coef $0.5$, entropy coef $0.0$, grad norm $0.5$; episodes $2000$ \\
+\hline
+SAC & continuous, dim $1$ & action range $[-25,25]$; hidden $128$; $\eta=3\times10^{-4}$, $\eta_\alpha=3\times10^{-4}$, $\tau=0.005$, $\gamma=0.99$; buffer $100000$, batch $64$; $\alpha_0=0.2$, auto-$\alpha$ True; episodes $2000$ \\
+\hline
+\end{tabularx}
+\caption{Main hyperparameters used by the five implemented algorithms.}
+\label{tab:hyperparams}
+\end{table}
+
+\noindent
+Here, $N_a$ is the number of discrete actions or action dimensions, $\eta$ is the learning rate, $\gamma$ is the discount factor, $\tau$ is the target-network soft-update rate, and $\epsilon$ controls exploration for value-based methods. For replay-based methods, \textit{buffer} denotes replay memory capacity and \textit{batch} denotes the mini-batch size per update. In SAC, $\alpha$ is the entropy temperature and $\eta_\alpha$ is its learning rate.
+
+\section{Results}
+
+\subsection{Training Curves}
+Figures~\ref{fig:all_reward} and~\ref{fig:all_length} compare the training reward and episode length of all five algorithms.
+\begin{itemize}
+    \item \textbf{Linear Q-Learning:} weak overall performance.
+    \item \textbf{DQN:} steady improvement but lower final performance than the top group.
+    \item \textbf{REINFORCE:} high eventual performance with slower and more variable learning.
+    \item \textbf{AC:} high final performance but slower convergence.
+    \item \textbf{SAC:} fastest early improvement and best sample efficiency.
+\end{itemize}
+
+\subsection{Observed Agent Behavior}
+This subsection is reserved for qualitative observations from the recorded play videos.
+\begin{itemize}
+    \item \textbf{Linear Q-Learning:} The learned behavior is highly oscillatory. The cart moves back and forth with large corrective actions, and the episode is usually terminated because the cart leaves the allowed boundary.
+    \item \textbf{DQN:} DQN can keep the pole upright for a while, but when the pole begins to lean, the cart often moves in the correct direction too slowly. As a result, the controller frequently fails to recover in time and the cart exits the track boundary.
+    \item \textbf{REINFORCE:} REINFORCE performs well in deployment. It can usually maintain both the pole angle and the cart position until the environment reaches the time limit, showing stable overall balancing behavior.
+    \item \textbf{AC:} AC performs worse than REINFORCE. Although it often keeps the pole angle under control, the cart motion is more jerky, and this oscillatory behavior causes frequent failures by driving the cart out of bounds.
+    \item \textbf{SAC:} SAC produces the smoothest behavior among the tested agents, which is consistent with its continuous-action policy. Even with only 1000 training episodes, it already shows strong and responsive control. Although longer training would likely improve it further, SAC already demonstrates the fastest learning trend in our experiments.
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{cartpole.png}
+    \caption{Representative Cart-Pole snapshot during agent evaluation.}
+    \label{fig:cartpole_snapshot}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{all_reward_episode.png}
+    \caption{Training reward comparison for Linear Q, DQN, REINFORCE, AC, and SAC.}
+    \label{fig:all_reward}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{all_ep_length.png}
+    \caption{Episode-length comparison for Linear Q, DQN, REINFORCE, AC, and SAC.}
+    \label{fig:all_length}
+\end{figure}
+
+\section{Discussion}
+\textbf{Which algorithm performs best?} Based on the observed deployment behavior, MC REINFORCE can be considered the strongest overall performer in this study because it most consistently maintains both the pole angle and the cart position until timeout. SAC is also a strong candidate because it learns much faster than the other methods and benefits from continuous-action control, which makes its behavior smoother and more responsive.
+
+\textbf{Why does SAC perform better?} SAC benefits from off-policy replay, twin critics, and entropy-regularized exploration. These improve sample efficiency and stabilize learning compared with the on-policy baselines.
+
+\section*{GitHub Repository}
+\noindent
+Name: Chayanin Napia \\
+Student ID: 65340500009 \\
+Repository: \url{https://github.com/ChayaninNapia/DRL_class_project}
+
+\end{document}

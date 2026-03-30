@@ -43,7 +43,15 @@ class MC_REINFORCE_network(nn.Module):
 
         # ===== Shared MLP body ===== #
         # ========= put your code here ========= #
-        pass
+        self.net = nn.Sequential(
+            nn.Linear(n_observations, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, n_actions),
+        )
         # ====================================== #
 
         # ===== Learnable log_std (continuous only) ===== #
@@ -66,7 +74,7 @@ class MC_REINFORCE_network(nn.Module):
             Tensor: Logits (discrete) or action mean (continuous).
         """
         # ========= put your code here ========= #
-        pass
+        return self.net(x)
         # ====================================== #
 
 
@@ -110,17 +118,18 @@ class MC_REINFORCE(BaseAlgorithm):
 
         # Feel free to add or modify any of the initialized variables above.
         # ========= put your code here ========= #
+        if device is None:
+            device = torch.device("cpu")
         self.action_type = action_type
-        self.LR          = learning_rate
+        self.LR = learning_rate
 
         self.policy_net = MC_REINFORCE_network(
             n_observations, hidden_dim, num_of_action, dropout, action_type
         ).to(device)
-        self.optimizer  = optim.AdamW(self.policy_net.parameters(), lr=learning_rate)
+        self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=learning_rate)
 
-        self.device     = device
+        self.device = device
         self.steps_done = 0
-        pass
         # ====================================== #
 
         super(MC_REINFORCE, self).__init__(
@@ -145,7 +154,12 @@ class MC_REINFORCE(BaseAlgorithm):
             torch.distributions.Distribution: Categorical or Normal distribution.
         """
         # ========= put your code here ========= #
-        pass
+        logits_or_mean = self.policy_net(obs)
+        if self.action_type == "discrete":
+            return Categorical(logits=logits_or_mean)
+
+        std = self.policy_net.log_std.exp().expand_as(logits_or_mean)
+        return Normal(logits_or_mean, std)
         # ====================================== #
 
     def _sample_action(self, dist) -> tuple[torch.Tensor, torch.Tensor]:
@@ -162,7 +176,12 @@ class MC_REINFORCE(BaseAlgorithm):
                 - log_prob: Shape ``(batch,)``.
         """
         # ========= put your code here ========= #
-        pass
+        action = dist.sample()
+        if self.action_type == "discrete":
+            return action.view(-1, 1), dist.log_prob(action)
+
+        log_prob = dist.log_prob(action).sum(dim=-1)
+        return action, log_prob
         # ====================================== #
 
     # ------------------------------------------------------------------ #
@@ -180,7 +199,16 @@ class MC_REINFORCE(BaseAlgorithm):
             Tensor: Normalised return tensor of shape ``(T,)``.
         """
         # ========= put your code here ========= #
-        pass
+        discounted_returns = []
+        running_return = 0.0
+        for reward in reversed(rewards):
+            running_return = reward + self.discount_factor * running_return
+            discounted_returns.insert(0, running_return)
+
+        returns = torch.tensor(discounted_returns, dtype=torch.float32, device=self.device)
+        if returns.numel() > 1:
+            returns = (returns - returns.mean()) / (returns.std(unbiased=False) + 1e-8)
+        return returns
         # ====================================== #
 
     def generate_trajectory(self, env):
@@ -198,7 +226,61 @@ class MC_REINFORCE(BaseAlgorithm):
                 - trajectory (list): ``[(state, action, reward), ...]``
         """
         # ========= put your code here ========= #
-        pass
+        obs, _ = env.reset()
+        if isinstance(obs, dict):
+            obs = obs.get("policy", next(iter(obs.values())))
+        if isinstance(obs, torch.Tensor):
+            obs_np = obs.detach().cpu().numpy().reshape(-1)
+        else:
+            obs_np = torch.as_tensor(obs, dtype=torch.float32).view(-1).cpu().numpy()
+
+        rewards = []
+        log_probs = []
+        trajectory = []
+        episode_return = 0.0
+
+        while True:
+            obs_tensor = torch.tensor(obs_np, dtype=torch.float32, device=self.device).view(1, -1)
+            dist = self._get_distribution(obs_tensor)
+            action_tensor, log_prob = self._sample_action(dist)
+
+            if self.action_type == "discrete":
+                action_idx = int(action_tensor.item())
+                action_min, action_max = self.action_range
+                if self.num_of_action == 1:
+                    env_action = torch.tensor([[action_min]], dtype=torch.float32, device=self.device)
+                else:
+                    scaled_value = action_min + (action_idx / (self.num_of_action - 1)) * (action_max - action_min)
+                    env_action = torch.tensor([[scaled_value]], dtype=torch.float32, device=self.device)
+            else:
+                env_action = action_tensor
+                action_idx = env_action.detach().cpu().numpy()
+
+            next_obs, reward, terminated, truncated, _ = env.step(env_action)
+            if isinstance(next_obs, dict):
+                next_obs = next_obs.get("policy", next(iter(next_obs.values())))
+
+            reward_value = float(reward.detach().cpu().item()) if isinstance(reward, torch.Tensor) else float(reward)
+            terminated_flag = bool(terminated.detach().cpu().item()) if isinstance(terminated, torch.Tensor) else bool(terminated)
+            truncated_flag = bool(truncated.detach().cpu().item()) if isinstance(truncated, torch.Tensor) else bool(truncated)
+            done = terminated_flag or truncated_flag
+
+            rewards.append(reward_value)
+            log_probs.append(log_prob.squeeze(0))
+            trajectory.append((obs_np.copy(), action_idx, reward_value))
+            episode_return += reward_value
+
+            if isinstance(next_obs, torch.Tensor):
+                obs_np = next_obs.detach().cpu().numpy().reshape(-1)
+            else:
+                obs_np = torch.as_tensor(next_obs, dtype=torch.float32).view(-1).cpu().numpy()
+
+            if done:
+                break
+
+        stepwise_returns = self.calculate_stepwise_returns(rewards)
+        log_prob_actions = torch.stack(log_probs)
+        return episode_return, stepwise_returns, log_prob_actions, trajectory
         # ====================================== #
 
     def calculate_loss(
@@ -217,7 +299,7 @@ class MC_REINFORCE(BaseAlgorithm):
             Tensor: Scalar loss.
         """
         # ========= put your code here ========= #
-        pass
+        return -(stepwise_returns * log_prob_actions).sum()
         # ====================================== #
 
     def update_policy(
@@ -236,7 +318,11 @@ class MC_REINFORCE(BaseAlgorithm):
             float: Loss value after the update.
         """
         # ========= put your code here ========= #
-        pass
+        loss = self.calculate_loss(stepwise_returns, log_prob_actions)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        return float(loss.item())
         # ====================================== #
 
     def learn(self, env, num_agents: int = 1):
@@ -253,7 +339,10 @@ class MC_REINFORCE(BaseAlgorithm):
         self.policy_net.train()
 
         # ========= put your code here ========= #
-        pass
+        del num_agents  # MC_REINFORCE here is implemented for a single environment.
+        episode_return, stepwise_returns, log_prob_actions, trajectory = self.generate_trajectory(env)
+        loss = self.update_policy(stepwise_returns, log_prob_actions)
+        return episode_return, loss, trajectory
         # ====================================== #
 
     # ------------------------------------------------------------------ #
@@ -269,7 +358,8 @@ class MC_REINFORCE(BaseAlgorithm):
             filename (str): File name (e.g., ``'reinforce_cartpole.pth'``).
         """
         # ========= put your code here ========= #
-        pass
+        os.makedirs(path, exist_ok=True)
+        torch.save(self.policy_net.state_dict(), os.path.join(path, filename))
         # ====================================== #
 
     def load_model(self, path: str, filename: str) -> None:
@@ -281,5 +371,7 @@ class MC_REINFORCE(BaseAlgorithm):
             filename (str): File name (e.g., ``'reinforce_cartpole.pth'``).
         """
         # ========= put your code here ========= #
-        pass
+        self.policy_net.load_state_dict(torch.load(os.path.join(path, filename), map_location=self.device))
+        self.policy_net.to(self.device)
+        self.policy_net.eval()
         # ====================================== #
